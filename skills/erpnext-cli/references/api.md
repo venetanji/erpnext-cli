@@ -121,6 +121,27 @@ erp import Note            notes.jsonl --dry-run                    # preview co
 Each row becomes a doc (file's columns/keys → fieldnames; child tables as nested lists in
 json/jsonl). **Each row is its own REST transaction**, so a failed row doesn't roll back the
 others and a re-run with `--key` resumes cleanly. `--key F` matches existing rows by a
-*field filter* (not the doc name — works even when autoname is a hash). For ERPNext's native
-Data Import engine (column mapping UI, validation report) instead, use a `Data Import` doc;
-this `import` is the fast scripted path.
+*field filter* (not the doc name — works even when autoname is a hash).
+
+### Native Data Import engine (`erp data-import`)
+
+Drives ERPNext's own Data Import (column mapping, type coercion, validation, per-row error
+log) for **csv/xlsx**. Use it when you want ERPNext's mapping/validation and an auditable
+import record; use `erp import` when you want a fast, idempotent scripted loop.
+
+```bash
+erp data-import "Purchase Invoice" bills.csv --submit --attach-pdf "<drive-url-of-source-pdf>"
+erp data-import Customer guests.xlsx --update          # Update Existing Records
+erp data-import "Journal Entry" rows.csv --no-wait     # enqueue only (pure REST, async)
+```
+
+- The target DocType must have **`allow_import`** enabled (`erp set-prop <DocType> "" allow_import 1 --type Check --doctype-prop`).
+- The csv/xlsx **header must map to field labels or fieldnames** (incl. child-table columns) —
+  that template is the caller's responsibility (and, for specific document formats, lives in a
+  back-office runbook skill, not here).
+- **`--attach-pdf <url>`** attaches the source document (e.g. the Drive PDF) to the Data Import
+  doc — so the import record links the loaded rows to their evidence. The csv is attached too.
+- **Synchronous by default**: the CLI triggers `start_import` synchronously via bench and
+  returns the terminal `status` + a row-level error summary. `--no-wait` instead enqueues via
+  the whitelisted `form_start_import` (pure REST, no container) and returns immediately — but
+  that needs a healthy **background worker** to process the queue.

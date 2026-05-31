@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import csv
 import json
+import mimetypes
 import os
 import subprocess
+import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -131,7 +134,11 @@ class ERPNextClient:
 
     def get_value(self, doctype: str, filters, fieldname="name"):
         params = {"doctype": doctype, "filters": filters, "fieldname": fieldname}
-        return self._request("GET", "/api/method/frappe.client.get_value", params)["message"]
+        msg = self._request("GET", "/api/method/frappe.client.get_value", params)["message"]
+        # frappe returns {fieldname: value} — unwrap to the scalar for a single field
+        if isinstance(fieldname, str) and isinstance(msg, dict):
+            return msg.get(fieldname)
+        return msg
 
     def count(self, doctype: str, filters=None) -> int:
         if doctype == self.GL_DOCTYPE and filters is None:
@@ -238,10 +245,97 @@ class ERPNextClient:
                 "attached_to_doctype": doctype, "attached_to_name": name}
         return self._request("POST", "/api/resource/File", body=body)["data"]
 
+    def upload_file(self, path: str, attach_doctype: str | None = None,
+                    attach_name: str | None = None, fieldname: str | None = None,
+                    private: bool = True) -> dict:
+        """Multipart upload to /api/method/upload_file → returns the File record
+        ({file_url, name, ...}). If attach_doctype/name/fieldname given, attaches to and
+        sets that field on the target doc."""
+        p = Path(path)
+        boundary = "----erpcli" + uuid.uuid4().hex
+        fields = {"is_private": "1" if private else "0"}
+        if attach_doctype:
+            fields["doctype"] = attach_doctype
+        if attach_name:
+            fields["docname"] = attach_name
+        if fieldname:
+            fields["fieldname"] = fieldname
+        parts = []
+        for k, v in fields.items():
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+        ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+        parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+                      f'filename="{p.name}"\r\nContent-Type: {ctype}\r\n\r\n').encode())
+        parts.append(p.read_bytes())
+        parts.append(f"\r\n--{boundary}--\r\n".encode())
+        req = urllib.request.Request(
+            f"{self.base}/api/method/upload_file", data=b"".join(parts), method="POST",
+            headers={"Authorization": self._auth, "Accept": "application/json",
+                     "Content-Type": f"multipart/form-data; boundary={boundary}"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read())["message"]
+        except urllib.error.HTTPError as e:
+            raise ERPNextError(self._explain(e)) from None
+
+    def data_import(self, reference_doctype: str, file_path: str,
+                    import_type: str = "Insert New Records", submit: bool = False,
+                    mute_emails: bool = True, attach_pdf: str | None = None,
+                    wait: bool = True, timeout: int = 300) -> dict:
+        """Drive ERPNext's native Data Import engine: create the Data Import doc, upload
+        the csv/xlsx, optionally attach a source PDF as evidence, start the (background)
+        import, and poll to a terminal status. Returns name + status + per-row log summary."""
+        di = self.insert({"doctype": "Data Import", "reference_doctype": reference_doctype,
+                          "import_type": import_type,
+                          "submit_after_import": int(submit), "mute_emails": int(mute_emails)})
+        name = di["name"]
+        up = self.upload_file(file_path, attach_doctype="Data Import", attach_name=name,
+                              fieldname="import_file", private=True)
+        if up.get("file_url"):
+            self.set_value("Data Import", name, "import_file", up["file_url"])
+        if attach_pdf:
+            self.attach_url("Data Import", name, attach_pdf)   # link source evidence
+
+        out = {"data_import": name, "reference_doctype": reference_doctype, "import_file": up.get("file_url")}
+        if not wait:
+            # pure-REST async: enqueue and return (a background worker processes it)
+            self.method("frappe.core.doctype.data_import.data_import.form_start_import", data_import=name)
+            out["status"] = "Pending (enqueued — needs a background worker)"
+            return out
+        # default: trigger SYNCHRONOUSLY via bench for a deterministic, worker-independent
+        # result (the synchronous start_import isn't REST-whitelisted; form_start_import only
+        # enqueues). Uses the container — the one server-side touch in this verb.
+        self._bench_execute("frappe.core.doctype.data_import.data_import.start_import",
+                            {"data_import": name})
+        out["status"] = self.get_value("Data Import", name, "status")
+        out["payload_count"] = self.get_value("Data Import", name, "payload_count")
+        try:
+            logs = self.method("frappe.core.doctype.data_import.data_import.get_import_logs",
+                               data_import=name) or []
+            errs = [ln for ln in logs if not ln.get("success")]
+            out["success_rows"] = len(logs) - len(errs)
+            out["error_rows"] = len(errs)
+            out["errors"] = [{"row": e.get("row_indexes"),
+                              "msg": (e.get("messages") or e.get("exception"))} for e in errs[:5]]
+        except ERPNextError:
+            pass
+        return out
+
     # ── server-side escape hatch (no docker cp when bind-mounted) ─────────────
     def _compose(self, *extra: str) -> list[str]:
         return ["docker", "compose", "-p", self.cfg["compose_project"],
                 "-f", self.cfg["compose_file"], *extra]
+
+    def _bench_execute(self, dotted_path: str, kwargs: dict | None = None) -> str:
+        """Run an installed-app function synchronously via `bench execute` (proper init +
+        auto-commit). Resolves dotted app paths via frappe.get_attr — so unlike
+        exec_script's eval form it works for framework/ERPNext functions."""
+        cmd = self._compose("exec", "-T", "-w", self.cfg.get("bench_dir", "/home/frappe/frappe-bench"),
+                            self.cfg.get("container_service", "backend"),
+                            "bench", "--site", self.site, "execute", dotted_path)
+        if kwargs:
+            cmd += ["--kwargs", json.dumps(kwargs)]
+        return self._run(cmd)
 
     def exec_script(self, target: str, mode: str = "execute") -> str:
         """Run server-side python inside the backend container.

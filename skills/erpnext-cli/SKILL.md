@@ -24,6 +24,12 @@ and even that avoids `docker cp` via a bind-mounted scripts dir.
 - "Net Dr-Cr balance on an account" / aggregates REST can't do → a **Server Script** (`erp method gl_balance`) or `erp exec`
 - "Cancel + amend a JE atomically" → the `cancel_and_amend_je` Server Script (one transaction)
 - A bulk loop, raw SQL, or filesystem/import → `erp exec module.function` (bench execute, auto-commit)
+- Loading a batch from a file (csv/xlsx) → `erp data-import` (native engine) or `erp import` (fast REST loop)
+
+**Not for: parsing source documents.** Turning a bank-statement or utility-bill **PDF** into
+rows is client- and format-specific and belongs in a back-office runbook skill (e.g.
+`shicheng-agents`), which parses PDF → csv/xlsx and then calls `erp data-import`/`erp import`.
+This CLI stays format-agnostic — it drives ERPNext, it does not read PDFs.
 
 ## Setup (per instance)
 
@@ -61,7 +67,8 @@ For the `exec`/Server-Script paths, do the **one-time** infra setup in
 | `erp attach <DocType> <name> <url> [--filename N]` | attach a URL (no byte copy) |
 | `erp add-field <DocType> <fieldname> <fieldtype> [--label --after --options --reqd --unique --read-only --force]` | add a Custom Field (idempotent) |
 | `erp set-prop <DocType> <field> <property> <value> [--type T] [--doctype-prop]` | tweak a field/doctype property via Property Setter (no code) |
-| `erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]` | bulk import (each row its own txn; `--key` = idempotent skip/update) |
+| `erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]` | fast bulk loop (each row its own txn; `--key` = idempotent skip/update) |
+| `erp data-import <DocType> <file.{csv,xlsx}> [--update --submit --attach-pdf URL --no-wait]` | ERPNext's **native Data Import** engine (column mapping + validation + error log); `--attach-pdf` links source evidence to the Data Import doc |
 | `erp exec module.function` | server-side python via `bench execute` (auto-commit) |
 | `erp exec --console file.py` | ad-hoc `bench console` (script self-commits) |
 

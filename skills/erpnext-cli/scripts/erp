@@ -21,7 +21,8 @@ bind-mounted scripts dir via the auto-committing bench execute / env python.
   erp attach <DocType> <name> <url> [--filename NAME]
   erp add-field <DocType> <fieldname> <fieldtype> [--label L --after F --options O --reqd --unique --read-only --force]
   erp set-prop <DocType> <field> <property> <value> [--type T] [--doctype-prop]   # Property Setter (no code)
-  erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]
+  erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]  # fast REST loop
+  erp data-import <DocType> <file.{csv,xlsx}> [--update --submit --attach-pdf URL --no-wait]          # native engine (mapping+validation+error log)
   erp exec module.function                          # server-side via bench execute (auto-commit)
   erp exec --console file.py                        # ad-hoc bench console script (self-commits)
 
@@ -176,6 +177,14 @@ def cmd_set_prop(args, c):
                        "property": args.property, "property_type": args.type, "value": args.value}))
 
 
+def cmd_data_import(args, c):
+    """native ERPNext Data Import engine for csv/xlsx (column mapping, validation, error log)"""
+    _out(c.data_import(args.doctype, args.file,
+                       import_type="Update Existing Records" if args.update else "Insert New Records",
+                       submit=args.submit, attach_pdf=args.attach_pdf,
+                       wait=not args.no_wait))
+
+
 def cmd_import(args, c):
     """bulk import json/jsonl/csv/xlsx → DocType over REST (each row its own txn).
     --key F: skip/update rows whose F already exists (idempotent re-runs). --dry-run previews."""
@@ -258,6 +267,9 @@ def main():
     add("import", cmd_import, "doctype", "file",
         key={}, update={"action": "store_true"}, submit={"action": "store_true"},
         limit={"type": int}, dry_run={"action": "store_true"})
+    add("data-import", cmd_data_import, "doctype", "file",
+        update={"action": "store_true"}, submit={"action": "store_true"},
+        attach_pdf={}, no_wait={"action": "store_true"})
     add("exec", cmd_exec, "target", console={"action": "store_true"})
 
     args = p.parse_args()
