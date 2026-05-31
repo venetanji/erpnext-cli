@@ -1,0 +1,12 @@
+{
+  "base_url": "http://localhost:8080",
+  "api_key": "YOUR_API_KEY",
+  "api_secret": "YOUR_API_SECRET",
+  "site": "frontend",
+  "compose_project": "your-erpnext-project",
+  "compose_file": "/absolute/path/to/frappe_docker/pwd.yml",
+  "container_service": "backend",
+  "scripts_bind_dir": "/absolute/host/path/cli-scripts",
+  "scripts_container_dir": "/home/frappe/frappe-bench/cli-scripts",
+  "bench_dir": "/home/frappe/frappe-bench"
+}

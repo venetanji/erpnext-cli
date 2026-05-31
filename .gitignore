@@ -1,0 +1,9 @@
+# Secrets & local state — NEVER commit
+config.json
+
+# Python
+__pycache__/
+*.pyc
+
+# logs / scratch
+*.log

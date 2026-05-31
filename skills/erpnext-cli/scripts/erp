@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""
+erp — a REST-first swiss-army CLI over a running ERPNext/Frappe instance.
+
+Default path is the token-auth REST API (no container, no file copy). The `exec`
+subcommand is the escape hatch for genuine server-side python, run through the
+bind-mounted scripts dir via the auto-committing bench execute / env python.
+
+  erp ping                                  # who am I / is it up
+  erp get <DocType> <name>
+  erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]
+  erp count <DocType> [--filters JSON]
+  erp report <Name> [--filters JSON]
+  erp insert <DocType> --json '{...}' [--unique '[["bill_no","=","X"]]']
+  erp set-value <DocType> <name> <field> <value>
+  erp submit|cancel|delete <DocType> <name>
+  erp method <dotted.path> [--json '{...}']         # any whitelisted method
+  erp doc-method <method> <DocType> <name> [--json '{...}']
+  erp attach <DocType> <name> <url> [--filename NAME]
+  erp exec module.function                          # server-side via bench execute (auto-commit)
+  erp exec --console file.py                        # ad-hoc bench console script (self-commits)
+
+Extend it: add a `cmd_<name>(args, c)` function and register a subparser in main().
+See CONTRIBUTING.md.
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from erpnext_client import ERPNextClient, ERPNextError  # noqa: E402
+
+
+def _out(obj):
+    print(obj if isinstance(obj, str) else json.dumps(obj, indent=2, default=str))
+
+
+def cmd_ping(args, c):
+    user = c.method("frappe.auth.get_logged_user")
+    print(f"✓ {c.base} (site {c.site}) — authenticated as {user}")
+
+
+def cmd_get(args, c):
+    _out(c.get(args.doctype, args.name))
+
+
+def cmd_list(args, c):
+    _out(c.list(args.doctype,
+                filters=json.loads(args.filters) if args.filters else None,
+                or_filters=json.loads(args.or_filters) if args.or_filters else None,
+                fields=json.loads(args.fields) if args.fields else None,
+                order_by=args.order_by, limit=args.limit))
+
+
+def cmd_count(args, c):
+    print(c.count(args.doctype, json.loads(args.filters) if args.filters else None))
+
+
+def cmd_report(args, c):
+    _out(c.report(args.name, json.loads(args.filters) if args.filters else None))
+
+
+def cmd_insert(args, c):
+    doc = json.loads(args.json)
+    if args.unique:
+        flt = json.loads(args.unique)
+        if c.exists(doc["doctype"], flt):
+            print(f"↩ skip: {doc['doctype']} matching {flt} already exists (idempotent)")
+            return
+    _out(c.insert(doc))
+
+
+def cmd_set_value(args, c):
+    _out(c.set_value(args.doctype, args.name, args.field, args.value))
+
+
+def cmd_submit(args, c):
+    _out(c.submit(args.doctype, args.name))
+
+
+def cmd_cancel(args, c):
+    _out(c.cancel(args.doctype, args.name))
+
+
+def cmd_delete(args, c):
+    _out(c.delete(args.doctype, args.name))
+
+
+def cmd_method(args, c):
+    _out(c.method(args.path, **(json.loads(args.json) if args.json else {})))
+
+
+def cmd_doc_method(args, c):
+    _out(c.run_doc_method(args.method, args.doctype, args.name,
+                          json.loads(args.json) if args.json else None))
+
+
+def cmd_attach(args, c):
+    _out(c.attach_url(args.doctype, args.name, args.url, args.filename))
+
+
+def cmd_exec(args, c):
+    """run server-side python: `erp exec module.function` (bench execute, auto-commit) or `erp exec --console file.py`"""
+    mode = "console" if args.console else "execute"
+    print(c.exec_script(args.target, mode=mode))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="erp", description="REST-first ERPNext CLI")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def add(name, fn, *pos, **opts):
+        sp = sub.add_parser(name, help=fn.__doc__)
+        for a in pos:
+            sp.add_argument(a)
+        for flag, kw in opts.items():
+            sp.add_argument("--" + flag.replace("_", "-"), **kw)
+        sp.set_defaults(_fn=fn)
+        return sp
+
+    add("ping", cmd_ping)
+    add("get", cmd_get, "doctype", "name")
+    add("list", cmd_list, "doctype", filters={}, fields={}, or_filters={},
+        order_by={}, limit={"type": int, "default": 20})
+    add("count", cmd_count, "doctype", filters={})
+    add("report", cmd_report, "name", filters={})
+    add("insert", cmd_insert, json={"required": True}, unique={})
+    add("set-value", cmd_set_value, "doctype", "name", "field", "value")
+    add("submit", cmd_submit, "doctype", "name")
+    add("cancel", cmd_cancel, "doctype", "name")
+    add("delete", cmd_delete, "doctype", "name")
+    add("method", cmd_method, "path", json={})
+    add("doc-method", cmd_doc_method, "method", "doctype", "name", json={})
+    add("attach", cmd_attach, "doctype", "name", "url", filename={})
+    add("exec", cmd_exec, "target", console={"action": "store_true"})
+
+    args = p.parse_args()
+    try:
+        args._fn(args, ERPNextClient())
+    except ERPNextError as e:
+        print(f"✗ {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
