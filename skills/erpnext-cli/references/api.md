@@ -79,5 +79,18 @@ P&L) are query reports — pass their exact report name.
 8. **Open period**: posting dates must fall in an open Fiscal Year (watch "Accounts Frozen
    Upto" / Period Closing Vouchers).
 
-Introspect when unsure: `erp method frappe.get_meta --json '{"doctype":"Sales Invoice"}'`,
-or list custom fields via `erp list "Custom Field" --filters '[["dt","=","Sales Invoice"]]'`.
+## Introspection & custom doctypes
+
+`frappe.get_meta` is **not** REST-whitelisted (403). Use the dedicated commands, which read
+the `DocType` resource and merge in `Custom Field` rows:
+
+```bash
+erp schema "Sales Invoice"          # fields + types + reqd/unique/read-only/link targets; custom fields marked *
+erp schema "License Agreement"      # works for custom doctypes too
+erp doctypes --custom               # discover custom doctypes (e.g. Flat / License Agreement / Room)
+erp doctypes --module Accounts
+```
+
+Custom doctypes are ordinary DocTypes — manage their documents with the same
+`get/list/insert/submit/...` verbs. `schema` is the quick "what fields does this actually
+have here?" check (every site can be customized — trust the live schema over assumptions).

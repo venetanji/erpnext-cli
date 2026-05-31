@@ -51,6 +51,8 @@ For the `exec`/Server-Script paths, do the **one-time** infra setup in
 | `erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]` | `frappe.client.get_list` |
 | `erp count <DocType> [--filters JSON]` | count |
 | `erp report <Name> [--filters JSON]` | query report |
+| `erp schema <DocType> [--all]` | live field schema (standard **+ custom** fields, with reqd/unique/link flags) |
+| `erp doctypes [--custom] [--module M]` | discover doctypes (e.g. the custom ones) |
 | `erp insert <DocType> --json '{…}' [--unique '[["bill_no","=","X"]]']` | create (idempotent if `--unique`) |
 | `erp set-value <DocType> <name> <field> <value>` | update one field |
 | `erp submit\|cancel\|delete <DocType> <name>` | lifecycle |

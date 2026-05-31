@@ -142,6 +142,23 @@ class ERPNextClient:
         """Idempotency pre-check — call before insert() to avoid duplicates."""
         return self.count(doctype, filters) > 0
 
+    def schema(self, doctype: str) -> dict:
+        """Live field schema for a DocType: its DocFields + any Custom Fields merged in
+        (standard doctypes store customizations separately in `Custom Field`). Works for
+        custom doctypes too. `frappe.get_meta` isn't REST-whitelisted, so we read the
+        `DocType` resource directly."""
+        dt = self.get("DocType", doctype)
+        fields = [dict(f, _custom=False) for f in dt.get("fields", [])]
+        cf = self.list("Custom Field", filters=[["dt", "=", doctype]],
+                       fields=["fieldname", "fieldtype", "label", "options", "reqd",
+                               "unique", "read_only", "insert_after"], limit=0)
+        fields += [dict(f, _custom=True) for f in cf]
+        return {"doctype": doctype, "module": dt.get("module"), "custom": dt.get("custom"),
+                "issingle": dt.get("issingle"), "istable": dt.get("istable"),
+                "is_submittable": dt.get("is_submittable"), "autoname": dt.get("autoname"),
+                "naming_rule": dt.get("naming_rule"), "title_field": dt.get("title_field"),
+                "fields": fields}
+
     def report(self, report_name: str, filters: dict | None = None) -> dict:
         params = {"report_name": report_name, "filters": filters or {}}
         return self._request("GET", "/api/method/frappe.desk.query_report.run", params)["message"]

@@ -11,6 +11,8 @@ bind-mounted scripts dir via the auto-committing bench execute / env python.
   erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]
   erp count <DocType> [--filters JSON]
   erp report <Name> [--filters JSON]
+  erp schema <DocType> [--all]                      # live field schema (standard + custom fields)
+  erp doctypes [--custom] [--module M]              # discover doctypes (e.g. custom ones)
   erp insert <DocType> --json '{...}' [--unique '[["bill_no","=","X"]]']
   erp set-value <DocType> <name> <field> <value>
   erp submit|cancel|delete <DocType> <name>
@@ -59,6 +61,42 @@ def cmd_count(args, c):
 
 def cmd_report(args, c):
     _out(c.report(args.name, json.loads(args.filters) if args.filters else None))
+
+
+def cmd_schema(args, c):
+    """show a DocType's live field schema (standard + custom fields)"""
+    s = c.schema(args.doctype)
+    flags = " ".join(k for k in ("custom", "issingle", "istable", "is_submittable") if s.get(k))
+    print(f"{s['doctype']}  [module={s['module']}{(' ' + flags) if flags else ''}]  autoname={s['autoname']}")
+    skip = {"Section Break", "Column Break", "Tab Break", "HTML", "Heading"}
+    for f in s["fields"]:
+        if not args.all and f.get("fieldtype") in skip:
+            continue
+        bits = ("*" if f.get("_custom") else "") + ("!" if f.get("reqd") else "") \
+            + ("U" if f.get("unique") else "") + ("R" if f.get("read_only") else "")
+        opt = f.get("options") or ""
+        if f.get("fieldtype") in ("Link", "Table", "Table MultiSelect"):
+            opt = "→ " + str(opt).split("\n")[0]
+        elif f.get("fieldtype") == "Select":
+            opt = "|".join(x for x in str(opt).split("\n") if x.strip())
+        print(f"  {f.get('fieldname',''):30} {f.get('fieldtype',''):18} {bits:4} {opt}")
+    print("  (legend: * custom  ! reqd  U unique  R read-only  → link/table target)")
+
+
+def cmd_doctypes(args, c):
+    """list DocTypes — --custom for only customized ones, --module to filter"""
+    filters = []
+    if args.custom:
+        filters.append(["custom", "=", 1])
+    if args.module:
+        filters.append(["module", "=", args.module])
+    rows = c.list("DocType", filters=filters or None,
+                  fields=["name", "module", "custom", "issingle", "istable"],
+                  order_by="name asc", limit=0)
+    for r in rows:
+        tags = " ".join(t for t, k in (("custom", "custom"), ("single", "issingle"), ("child", "istable")) if r.get(k))
+        print(f"{r['name']:42} {r.get('module',''):22} {tags}")
+    print(f"-- {len(rows)} doctypes")
 
 
 def cmd_insert(args, c):
@@ -125,6 +163,8 @@ def main():
         order_by={}, limit={"type": int, "default": 20})
     add("count", cmd_count, "doctype", filters={})
     add("report", cmd_report, "name", filters={})
+    add("schema", cmd_schema, "doctype", all={"action": "store_true"})
+    add("doctypes", cmd_doctypes, custom={"action": "store_true"}, module={})
     add("insert", cmd_insert, json={"required": True}, unique={})
     add("set-value", cmd_set_value, "doctype", "name", "field", "value")
     add("submit", cmd_submit, "doctype", "name")
