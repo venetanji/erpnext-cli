@@ -12,6 +12,7 @@ bind-mounted scripts dir via the auto-committing bench execute / env python.
   erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]
   erp count <DocType> [--filters JSON]
   erp report <Name> [--filters JSON]
+  erp reconcile <BankAccount> [--from-date D --to-date D --types pe,je,si,pi --exact --limit N]  # preview matcher
   erp schema <DocType> [--all]                      # live field schema (standard + custom fields)
   erp doctypes [--custom] [--module M]              # discover doctypes (e.g. custom ones)
   erp insert <DocType> --json '{...}' [--unique '[["bill_no","=","X"]]']
@@ -85,6 +86,29 @@ def cmd_count(args, c):
 
 def cmd_report(args, c):
     _out(c.report(args.name, json.loads(args.filters) if args.filters else None))
+
+
+def cmd_reconcile(args, c):
+    """preview bank-reconciliation matches for unreconciled transactions (read-only)"""
+    bts = c.bank_transactions_open(args.bank_account, args.from_date, args.to_date)
+    if args.limit:
+        bts = bts[:args.limit]
+    types = args.types.split(",") if args.types else None
+    matched = 0
+    for bt in bts:
+        amt = bt.get("withdrawal") or bt.get("deposit") or bt.get("unallocated_amount") or 0
+        m = c.linked_payments(bt["name"], types=types, from_date=args.from_date,
+                              to_date=args.to_date, exact=args.exact)
+        if m:
+            matched += 1
+        flag = "✓" if m else "·"
+        print(f"{flag} {bt.get('date')}  {float(amt):>11,.2f}  {(bt.get('description') or '').strip()[:48]}")
+        for v in m[:3]:
+            vamt = v.get("paid_amount") or v.get("amount") or v.get("outstanding_amount")
+            print(f"        → {v.get('doctype')} {v.get('name')}  amt={vamt}  rank={v.get('rank')}")
+    print(f"-- {matched}/{len(bts)} open transactions have ≥1 candidate match"
+          + (" (exact only)" if args.exact else ""))
+    return 0
 
 
 def cmd_schema(args, c):
@@ -269,6 +293,9 @@ def main():
         order_by={}, limit={"type": int, "default": 20})
     add("count", cmd_count, "doctype", filters={})
     add("report", cmd_report, "name", filters={})
+    add("reconcile", cmd_reconcile, "bank_account",
+        from_date={}, to_date={}, types={}, exact={"action": "store_true"},
+        limit={"type": int, "default": 25})
     add("schema", cmd_schema, "doctype", all={"action": "store_true"})
     add("doctypes", cmd_doctypes, custom={"action": "store_true"}, module={})
     add("insert", cmd_insert, json={"required": True}, unique={})

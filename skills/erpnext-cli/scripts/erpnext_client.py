@@ -151,6 +151,30 @@ class ERPNextClient:
         """Idempotency pre-check — call before insert() to avoid duplicates."""
         return self.count(doctype, filters) > 0
 
+    _BRT = "erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool"
+
+    def bank_transactions_open(self, bank_account: str, from_date=None, to_date=None) -> list[dict]:
+        """Unreconciled bank transactions (unallocated_amount > 0) for a Bank Account."""
+        return self.method(f"{self._BRT}.get_bank_transactions",
+                           bank_account=bank_account, from_date=from_date, to_date=to_date) or []
+
+    def linked_payments(self, bt_name: str, types=None, from_date=None, to_date=None,
+                        exact: bool = False) -> list[dict]:
+        """Candidate vouchers the reconciliation matcher proposes for a bank transaction.
+        types: any of payment_entry/journal_entry/sales_invoice/purchase_invoice/bank_transaction.
+        exact=True restricts to exact-amount matches (adds the 'exact_match' sentinel)."""
+        dt = list(types or ["payment_entry", "journal_entry", "sales_invoice", "purchase_invoice"])
+        if exact and "exact_match" not in dt:
+            dt.append("exact_match")
+        return self.method(f"{self._BRT}.get_linked_payments",
+                           bank_transaction_name=bt_name, document_types=dt,
+                           from_date=from_date, to_date=to_date) or []
+
+    def reconcile_voucher(self, bt_name: str, vouchers: list[dict]) -> dict:
+        """Link a bank transaction to chosen vouchers ([{payment_doctype, payment_name, amount}])."""
+        return self.method(f"{self._BRT}.reconcile_vouchers",
+                           bank_transaction_name=bt_name, vouchers=json.dumps(vouchers))
+
     def schema(self, doctype: str) -> dict:
         """Live field schema for a DocType: its DocFields + any Custom Fields merged in
         (standard doctypes store customizations separately in `Custom Field`). Works for

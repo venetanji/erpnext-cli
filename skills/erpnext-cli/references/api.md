@@ -64,6 +64,35 @@ Returns `{result:[...], columns:[...]}`. A user with the **"No reports" role get
 on `/Reports` and `/Journals`. Standard financial statements (Trial Balance, Balance Sheet,
 P&L) are query reports — pass their exact report name.
 
+## Bank reconciliation
+
+ERPNext's Bank Reconciliation Tool exposes a full matcher over REST. `erp reconcile
+<BankAccount>` previews it (read-only): for each **open** bank transaction
+(`unallocated_amount > 0`) it lists the candidate vouchers the engine proposes.
+
+```bash
+erp reconcile "HSBC HKD Current 189-838 - HSBC" --from-date 2026-04-01 --to-date 2026-05-31 --exact
+```
+
+- `<BankAccount>` is the **Bank Account** doctype record name (not the chart account).
+- `--types` = any of `payment_entry,journal_entry,sales_invoice,purchase_invoice,bank_transaction`.
+- `--exact` restricts to exact-amount matches.
+- Matching needs vouchers on the other side: a rent receipt matches an outstanding **Sales
+  Invoice**; a utility autopay matches a **Purchase Invoice/Payment Entry**. No vouchers →
+  no matches (an empty period reconciles to nothing).
+- Client helpers: `bank_transactions_open()`, `linked_payments()`, `reconcile_voucher()`.
+
+**Matching settings** live in the `Accounts Settings` single doctype (tune via
+`erp set-value "Accounts Settings" "Accounts Settings" <field> <value>`):
+
+| Field | Effect |
+|---|---|
+| `auto_reconcile_payments` | enable the **background** auto-matcher (exact matches reconcile on a schedule — needs healthy workers, see `erp doctor`) |
+| `auto_reconciliation_job_trigger` | minutes between auto-reconcile runs |
+| `reconciliation_queue_size` | batch size per run |
+| `enable_fuzzy_matching` | fuzzy reference/description matching |
+| `enable_party_matching` | match on party as well as amount |
+
 ## Hard rules (the client enforces / reminds)
 
 1. **`docstatus`** 0/1/2; submit is one-way → cancel+amend (see `server-side.md`).
