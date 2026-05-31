@@ -7,6 +7,7 @@ subcommand is the escape hatch for genuine server-side python, run through the
 bind-mounted scripts dir via the auto-committing bench execute / env python.
 
   erp ping                                  # who am I / is it up
+  erp doctor [--fix] [--quiet]              # background-worker/queue health; --fix restarts dead workers
   erp get <DocType> <name>
   erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]
   erp count <DocType> [--filters JSON]
@@ -32,6 +33,7 @@ See CONTRIBUTING.md.
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,6 +47,24 @@ def _out(obj):
 def cmd_ping(args, c):
     user = c.method("frappe.auth.get_logged_user")
     print(f"✓ {c.base} (site {c.site}) — authenticated as {user}")
+
+
+def cmd_doctor(args, c):
+    """background-worker/queue health; --fix restarts workers if none are online (cron-friendly with --quiet)"""
+    d = c.doctor()
+    if args.fix and not d["healthy"]:
+        c.restart_workers()
+        d = c.doctor()
+        d["fixed"] = True
+    if args.quiet:
+        ts = datetime.now().isoformat(timespec="seconds")
+        extra = " (restarted)" if d.get("fixed") else ""
+        sched = " scheduler=DISABLED" if d.get("scheduler_disabled") else ""
+        print(f"{ts} workers={d['workers_online']} pending={d['pending_jobs']} "
+              f"healthy={d['healthy']}{extra}{sched}")
+    else:
+        _out(d)
+    return 0 if d["healthy"] else 1
 
 
 def cmd_get(args, c):
@@ -243,6 +263,7 @@ def main():
         return sp
 
     add("ping", cmd_ping)
+    add("doctor", cmd_doctor, fix={"action": "store_true"}, quiet={"action": "store_true"})
     add("get", cmd_get, "doctype", "name")
     add("list", cmd_list, "doctype", filters={}, fields={}, or_filters={},
         order_by={}, limit={"type": int, "default": 20})

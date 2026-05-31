@@ -28,6 +28,7 @@ import csv
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import time
 import uuid
@@ -325,6 +326,33 @@ class ERPNextClient:
     def _compose(self, *extra: str) -> list[str]:
         return ["docker", "compose", "-p", self.cfg["compose_project"],
                 "-f", self.cfg["compose_file"], *extra]
+
+    def doctor(self) -> dict:
+        """Background-job health via `bench doctor`: RQ workers online, pending jobs per
+        queue, scheduler state. `healthy` is False when no worker is consuming — the
+        zombie-worker failure mode (a warm-shut-down worker deregisters but its container
+        stays 'Up', so on-failure restart never fires)."""
+        out = self._run(self._compose("exec", "-T", self.cfg.get("container_service", "backend"),
+                                      "bench", "doctor"))
+        m = re.search(r"Workers online:\s*(\d+)", out)
+        workers = int(m.group(1)) if m else None
+        queues, cur = {}, None
+        for line in out.splitlines():
+            qm = re.match(r"\s*Queue:\s*(\S+)", line)
+            if qm:
+                cur = qm.group(1)
+            jm = re.match(r"\s*Number of Jobs:\s*(\d+)", line)
+            if jm and cur:
+                queues[cur] = int(jm.group(1)); cur = None
+        return {"workers_online": workers, "queues": queues,
+                "pending_jobs": sum(queues.values()),
+                "scheduler_disabled": "scheduler is disabled" in out.lower(),
+                "healthy": bool(workers and workers > 0)}
+
+    def restart_workers(self) -> str:
+        """Restart the queue/scheduler containers to respawn consuming workers."""
+        svcs = self.cfg.get("worker_services", ["queue-short", "queue-long", "scheduler"])
+        return self._run(self._compose("restart", *svcs))
 
     def _bench_execute(self, dotted_path: str, kwargs: dict | None = None) -> str:
         """Run an installed-app function synchronously via `bench execute` (proper init +

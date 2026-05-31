@@ -53,6 +53,7 @@ For the `exec`/Server-Script paths, do the **one-time** infra setup in
 | Command | Does (all REST, no container) |
 |---|---|
 | `erp ping` | auth + identity check |
+| `erp doctor [--fix] [--quiet]` | background-worker/queue health; `--fix` restarts dead workers (cron-friendly) |
 | `erp get <DocType> <name>` | one document |
 | `erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]` | `frappe.client.get_list` |
 | `erp count <DocType> [--filters JSON]` | count |

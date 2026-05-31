@@ -104,3 +104,24 @@ container, so `:ro` files are readable without chmod.
    doesn't hot-apply to running gunicorn workers — recreate the backend.
 4. **`bench console` ≠ auto-commit; `bench execute` = auto-commit.** Use `execute` for
    anything scripted/repeatable.
+5. **Background workers can go zombie.** A warm-shut-down RQ worker deregisters from redis
+   but its `queue-short`/`queue-long` container stays `"Up"`, so `restart_policy: on-failure`
+   never restarts it — enqueued jobs (scheduled tasks, async Data Import via `--no-wait`,
+   emails) pile up silently. **`bench doctor` shows `Workers online: 0`.**
+
+## Background-worker health (`erp doctor`)
+
+```bash
+erp doctor                 # JSON: workers_online, pending jobs per queue, scheduler state
+erp doctor --fix           # restart the queue/scheduler containers if no worker is online
+erp doctor --fix --quiet   # one-line, exit≠0 when unhealthy — for cron
+```
+
+Wire a self-healing monitor in cron so a zombie worker can't sit dead for hours:
+
+```cron
+*/15 * * * * /path/to/erp doctor --fix --quiet >> /path/to/worker_monitor.log 2>&1
+```
+
+Anything using the **async** path (`erp data-import --no-wait`, `frappe.enqueue`) depends on
+a healthy worker; the synchronous default of `erp data-import` does not.
