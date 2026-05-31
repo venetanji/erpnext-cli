@@ -24,6 +24,7 @@ Reference: https://docs.frappe.io/framework/user/en/api/rest
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import subprocess
@@ -158,6 +159,36 @@ class ERPNextClient:
                 "is_submittable": dt.get("is_submittable"), "autoname": dt.get("autoname"),
                 "naming_rule": dt.get("naming_rule"), "title_field": dt.get("title_field"),
                 "fields": fields}
+
+    @staticmethod
+    def read_records(path: str) -> list[dict]:
+        """Parse a bulk-import file into row dicts. Supports .json (array or single),
+        .jsonl, .csv (header row → fieldnames), .xlsx (first sheet, header row)."""
+        p = Path(path)
+        ext = p.suffix.lower()
+        if ext == ".json":
+            data = json.loads(p.read_text())
+            return data if isinstance(data, list) else [data]
+        if ext == ".jsonl":
+            return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()]
+        if ext == ".csv":
+            with open(p, newline="") as f:
+                return [dict(r) for r in csv.DictReader(f)]
+        if ext in (".xlsx", ".xlsm"):
+            try:
+                import openpyxl
+            except ImportError:
+                raise ERPNextError("xlsx import needs openpyxl (pip install openpyxl)") from None
+            ws = openpyxl.load_workbook(p, read_only=True, data_only=True).active
+            it = ws.iter_rows(values_only=True)
+            header = [str(h).strip() if h is not None else "" for h in next(it)]
+            out = []
+            for r in it:
+                if all(c is None for c in r):
+                    continue
+                out.append({header[i]: r[i] for i in range(min(len(header), len(r))) if header[i]})
+            return out
+        raise ERPNextError(f"unsupported file type {ext!r} (use .json/.jsonl/.csv/.xlsx)")
 
     def report(self, report_name: str, filters: dict | None = None) -> dict:
         params = {"report_name": report_name, "filters": filters or {}}

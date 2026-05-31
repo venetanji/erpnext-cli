@@ -59,6 +59,9 @@ For the `exec`/Server-Script paths, do the **one-time** infra setup in
 | `erp method <dotted.path> [--json '{…}']` | any whitelisted / ERPNext factory method, or a Server Script API |
 | `erp doc-method <method> <DocType> <name> [--json '{…}']` | run a controller method on a doc |
 | `erp attach <DocType> <name> <url> [--filename N]` | attach a URL (no byte copy) |
+| `erp add-field <DocType> <fieldname> <fieldtype> [--label --after --options --reqd --unique --read-only --force]` | add a Custom Field (idempotent) |
+| `erp set-prop <DocType> <field> <property> <value> [--type T] [--doctype-prop]` | tweak a field/doctype property via Property Setter (no code) |
+| `erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]` | bulk import (each row its own txn; `--key` = idempotent skip/update) |
 | `erp exec module.function` | server-side python via `bench execute` (auto-commit) |
 | `erp exec --console file.py` | ad-hoc `bench console` (script self-commits) |
 

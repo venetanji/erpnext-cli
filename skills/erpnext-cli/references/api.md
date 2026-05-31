@@ -94,3 +94,33 @@ erp doctypes --module Accounts
 Custom doctypes are ordinary DocTypes — manage their documents with the same
 `get/list/insert/submit/...` verbs. `schema` is the quick "what fields does this actually
 have here?" check (every site can be customized — trust the live schema over assumptions).
+
+### Customization wrappers
+
+`Custom Field` / `Property Setter` are themselves DocTypes, so customization is just
+inserts — these wrappers make them idempotent and one-line:
+
+```bash
+erp add-field "Sales Invoice" xero_invoice_no Data --after customer --read-only   # idempotent
+erp set-prop  "Sales Invoice" xero_invoice_no in_list_view 1 --type Check          # Property Setter, no code
+erp set-prop  "Sales Invoice" "" naming_series Data --doctype-prop                 # doctype-level property
+```
+
+`add-field` skips if the field exists (`--force` to update); `set-prop` upserts. Confirm with
+`erp schema <DocType>` (custom fields show `*`).
+
+## Bulk import (json / jsonl / csv / xlsx)
+
+```bash
+erp import "Journal Entry" rows.json   --key user_remark            # idempotent: skip existing
+erp import Customer        guests.csv  --key customer_name --update # update matches instead
+erp import "Sales Invoice" si.xlsx     --submit                     # submit each after insert
+erp import Note            notes.jsonl --dry-run                    # preview counts, no writes
+```
+
+Each row becomes a doc (file's columns/keys → fieldnames; child tables as nested lists in
+json/jsonl). **Each row is its own REST transaction**, so a failed row doesn't roll back the
+others and a re-run with `--key` resumes cleanly. `--key F` matches existing rows by a
+*field filter* (not the doc name — works even when autoname is a hash). For ERPNext's native
+Data Import engine (column mapping UI, validation report) instead, use a `Data Import` doc;
+this `import` is the fast scripted path.

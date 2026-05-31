@@ -19,6 +19,9 @@ bind-mounted scripts dir via the auto-committing bench execute / env python.
   erp method <dotted.path> [--json '{...}']         # any whitelisted method
   erp doc-method <method> <DocType> <name> [--json '{...}']
   erp attach <DocType> <name> <url> [--filename NAME]
+  erp add-field <DocType> <fieldname> <fieldtype> [--label L --after F --options O --reqd --unique --read-only --force]
+  erp set-prop <DocType> <field> <property> <value> [--type T] [--doctype-prop]   # Property Setter (no code)
+  erp import <DocType> <file.{json,jsonl,csv,xlsx}> [--key F --update --submit --limit N --dry-run]
   erp exec module.function                          # server-side via bench execute (auto-commit)
   erp exec --console file.py                        # ad-hoc bench console script (self-commits)
 
@@ -138,6 +141,79 @@ def cmd_attach(args, c):
     _out(c.attach_url(args.doctype, args.name, args.url, args.filename))
 
 
+def cmd_add_field(args, c):
+    """add a Custom Field to a DocType (idempotent; --force updates)"""
+    doc = {"doctype": "Custom Field", "dt": args.doctype, "fieldname": args.fieldname,
+           "fieldtype": args.fieldtype,
+           "label": args.label or args.fieldname.replace("_", " ").title(),
+           "insert_after": args.after, "options": args.options,
+           "reqd": int(args.reqd), "unique": int(args.unique), "read_only": int(args.read_only)}
+    ex = c.list("Custom Field", filters=[["dt", "=", args.doctype], ["fieldname", "=", args.fieldname]],
+                fields=["name"], limit=1)
+    if ex:
+        if not args.force:
+            print(f"↩ Custom Field {args.doctype}.{args.fieldname} exists (use --force to update)")
+            return
+        c.set_value("Custom Field", ex[0]["name"], {k: v for k, v in doc.items() if k != "doctype"})
+        print(f"↻ updated {ex[0]['name']}")
+    else:
+        _out(c.insert(doc))
+
+
+def cmd_set_prop(args, c):
+    """upsert a Property Setter (field-level; --doctype-prop for a doctype-level property)"""
+    dof = "DocType" if args.doctype_prop else "DocField"
+    flt = [["doc_type", "=", args.doctype], ["property", "=", args.property], ["doctype_or_field", "=", dof]]
+    if not args.doctype_prop:
+        flt.append(["field_name", "=", args.field])
+    ex = c.list("Property Setter", filters=flt, fields=["name"], limit=1)
+    if ex:
+        c.set_value("Property Setter", ex[0]["name"], {"value": args.value, "property_type": args.type})
+        print(f"↻ updated {ex[0]['name']} → {args.value}")
+    else:
+        _out(c.insert({"doctype": "Property Setter", "doctype_or_field": dof, "doc_type": args.doctype,
+                       "field_name": None if args.doctype_prop else args.field,
+                       "property": args.property, "property_type": args.type, "value": args.value}))
+
+
+def cmd_import(args, c):
+    """bulk import json/jsonl/csv/xlsx → DocType over REST (each row its own txn).
+    --key F: skip/update rows whose F already exists (idempotent re-runs). --dry-run previews."""
+    rows = c.read_records(args.file)
+    if args.limit:
+        rows = rows[:args.limit]
+    created = updated = skipped = errors = 0
+    for i, raw in enumerate(rows, 1):
+        row = {k: v for k, v in raw.items() if v is not None and v != ""}
+        row["doctype"] = args.doctype
+        try:
+            if args.key and row.get(args.key) is not None:
+                ex = c.list(args.doctype, filters=[[args.key, "=", row[args.key]]], fields=["name"], limit=1)
+                if ex:
+                    if args.update and not args.dry_run:
+                        c.set_value(args.doctype, ex[0]["name"],
+                                    {k: v for k, v in row.items() if k not in ("doctype", args.key)})
+                        if args.submit:
+                            c.submit(args.doctype, ex[0]["name"])
+                    updated += 1 if args.update else 0
+                    skipped += 0 if args.update else 1
+                    continue
+            if args.dry_run:
+                created += 1
+                continue
+            doc = c.insert(row)
+            if args.submit:
+                c.submit(args.doctype, doc["name"])
+            created += 1
+        except Exception as e:
+            errors += 1
+            print(f"  row {i} ERR: {str(e)[:160]}")
+        if i % 50 == 0:
+            print(f"  …{i}/{len(rows)}  created {created} updated {updated} skipped {skipped} err {errors}", flush=True)
+    _out({"file": args.file, "doctype": args.doctype, "rows": len(rows), "created": created,
+          "updated": updated, "skipped": skipped, "errors": errors, "dry_run": bool(args.dry_run)})
+
+
 def cmd_exec(args, c):
     """run server-side python: `erp exec module.function` (bench execute, auto-commit) or `erp exec --console file.py`"""
     mode = "console" if args.console else "execute"
@@ -173,6 +249,15 @@ def main():
     add("method", cmd_method, "path", json={})
     add("doc-method", cmd_doc_method, "method", "doctype", "name", json={})
     add("attach", cmd_attach, "doctype", "name", "url", filename={})
+    add("add-field", cmd_add_field, "doctype", "fieldname", "fieldtype",
+        label={}, after={}, options={},
+        reqd={"action": "store_true"}, unique={"action": "store_true"},
+        read_only={"action": "store_true"}, force={"action": "store_true"})
+    add("set-prop", cmd_set_prop, "doctype", "field", "property", "value",
+        type={"default": "Data"}, doctype_prop={"action": "store_true"})
+    add("import", cmd_import, "doctype", "file",
+        key={}, update={"action": "store_true"}, submit={"action": "store_true"},
+        limit={"type": int}, dry_run={"action": "store_true"})
     add("exec", cmd_exec, "target", console={"action": "store_true"})
 
     args = p.parse_args()
