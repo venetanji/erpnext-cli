@@ -12,7 +12,9 @@ bind-mounted scripts dir via the auto-committing bench execute / env python.
   erp list <DocType> [--filters JSON] [--fields JSON] [--order-by S] [--limit N]
   erp count <DocType> [--filters JSON]
   erp report <Name> [--filters JSON]
-  erp reconcile <BankAccount> [--from-date D --to-date D --types pe,je,si,pi --exact --limit N]  # preview matcher
+  erp reconcile <BankAccount> [--from-date D --to-date D] [--match-from D --match-to D] [--types ... --exact --limit N]
+      # preview matcher: --from/--to select bank txns; --match-from/--match-to bound the voucher
+      # window (PE/JE matching SQL requires a posting-date window — defaults to the txn window)
   erp schema <DocType> [--all]                      # live field schema (standard + custom fields)
   erp doctypes [--custom] [--module M]              # discover doctypes (e.g. custom ones)
   erp insert <DocType> --json '{...}' [--unique '[["bill_no","=","X"]]']
@@ -97,8 +99,12 @@ def cmd_reconcile(args, c):
     matched = 0
     for bt in bts:
         amt = bt.get("withdrawal") or bt.get("deposit") or bt.get("unallocated_amount") or 0
-        m = c.linked_payments(bt["name"], types=types, from_date=args.from_date,
-                              to_date=args.to_date, exact=args.exact)
+        # voucher match window: PE/JE matching SQL requires posting_date.between(from,to),
+        # so pass a window. Widen a few days each side of the bank-txn window since a
+        # payment's posting date can differ slightly from when it cleared the bank.
+        mf = args.match_from or args.from_date
+        mt = args.match_to or args.to_date
+        m = c.linked_payments(bt["name"], types=types, from_date=mf, to_date=mt, exact=args.exact)
         if m:
             matched += 1
         flag = "✓" if m else "·"
@@ -294,8 +300,10 @@ def main():
     add("count", cmd_count, "doctype", filters={})
     add("report", cmd_report, "name", filters={})
     add("reconcile", cmd_reconcile, "bank_account",
-        from_date={}, to_date={}, types={}, exact={"action": "store_true"},
-        limit={"type": int, "default": 25})
+        from_date={}, to_date={}, match_from={}, match_to={}, types={},
+        exact={"action": "store_true"}, limit={"type": int, "default": 25})
+    # note: cmd_reconcile reads args.match_from/args.match_to (voucher window; PE/JE matching
+    # SQL requires posting_date BETWEEN, so a window is mandatory — defaults to the txn window)
     add("schema", cmd_schema, "doctype", all={"action": "store_true"})
     add("doctypes", cmd_doctypes, custom={"action": "store_true"}, module={})
     add("insert", cmd_insert, json={"required": True}, unique={})

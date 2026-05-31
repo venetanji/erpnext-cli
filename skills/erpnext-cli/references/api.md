@@ -81,6 +81,8 @@ erp reconcile "HSBC HKD Current 189-838 - HSBC" --from-date 2026-04-01 --to-date
   Invoice**; a utility autopay matches a **Purchase Invoice/Payment Entry**. No vouchers →
   no matches (an empty period reconciles to nothing).
 - Client helpers: `bank_transactions_open()`, `linked_payments()`, `reconcile_voucher()`.
+- **Date window matters:** the PE/JE matching SQL filters `posting_date BETWEEN from_date AND to_date` — passing no window matches nothing. `erp reconcile` defaults the voucher window to the bank-txn window (`--from-date/--to-date`); use `--match-from/--match-to` to widen it.
+- **Best matched via Payment Entries:** match a deposit to a *Payment Entry* (exact amount + date), not directly to the invoice — a PE carries the actual paid amount and is independent of customer-name matching. Mirror an external system's payments as PEs (allocated to the invoice) and reconciliation becomes a clean exact match.
 
 **Matching settings** live in the `Accounts Settings` single doctype (tune via
 `erp set-value "Accounts Settings" "Accounts Settings" <field> <value>`):
